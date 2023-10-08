@@ -4,7 +4,18 @@ local boltbuf, boltline, boltwin, boltbucket
 
 local bufkeymap = api.nvim_buf_set_keymap
 
+-- helper: trum space in string
+local function trimspace(str)
+	if not str then
+		return ""
+	end
+	return str:gsub("^%s*(.-)%s*$", "%1")
+end
+
+
 --[[
+-- open_float -- opens the folat window and set teh keymap
+--
 -- keymap in the form of
 -- {
 --      {
@@ -13,6 +24,8 @@ local bufkeymap = api.nvim_buf_set_keymap
 --      is_lua = true|false
 --      },
 -- }
+--
+-- cursorend, should move cursor to the end of the line
 --]]
 local function open_float(text, title, kmap, cursorend)
 	local width = api.nvim_win_get_width(0)
@@ -66,8 +79,9 @@ local function close_window()
 	api.nvim_win_close(win, true)
 end
 
+-- helper: find match for key => value
 local function getmatch(txt)
-	local match = string.gmatch(txt, "[ \t]+([^ \t]+)[ \t]*=>[ \t]*(.*)")
+	local match = string.gmatch(txt, "%s*([^(=>)]-)%s*=>%s*(.-)%s*$")
 	local matchinfo = {}
 	for k, v in match do
 		table.insert(matchinfo, k)
@@ -76,40 +90,63 @@ local function getmatch(txt)
 	return matchinfo
 end
 
+--[[
+-- callback from a float window, replace .boltdb buffer's line with the content in the float window
+--]]
 local function replace_entry()
 	local txt = api.nvim_buf_get_lines(0, 0, 1, false)
 	local matchinfo = getmatch(txt[1])
+
+	local linecontent = api.nvim_buf_get_lines(boltbuf, boltline-1, boltline, false)
+	local matchinfo2 = getmatch(linecontent[1])
+
 	close_window()
 	if #matchinfo ~= 0 then
+		if matchinfo2[1] ~= matchinfo[1] then
+			-- key is not the same
+			api.nvim_err_writeln("modified key mismatch")
+			return nil
+		end
 		vim.fn["BoltviewerCreateEntryAnyway"](boltbucket, matchinfo[1], matchinfo[2])
-		api.nvim_buf_set_lines(boltbuf, boltline - 1, boltline, false, txt)
+		api.nvim_buf_set_lines(boltbuf, boltline - 1, boltline, false, {"\t"..matchinfo[1].." => "..matchinfo[2]})
 	else
 		api.nvim_err_writeln("entry format key => val error")
 	end
 end
 
+--[[
+-- callback from a float window, insert a entry in .boltdb content
+--]]
 local function insert_entry()
 	local txt = api.nvim_buf_get_lines(0, 0, 1, false)
 	local matchinfo = getmatch(txt[1])
 	close_window()
 	if #matchinfo ~= 0 then
 		vim.fn["BoltviewerCreateEntry"](boltbucket, matchinfo[1], matchinfo[2])
-		api.nvim_buf_set_lines(boltbuf, boltline, boltline, false, txt)
+		api.nvim_buf_set_lines(boltbuf, boltline, boltline, false, {"\t"..matchinfo[1].." => "..matchinfo[2]})
 	else
 		api.nvim_err_writeln("entry format key => val error")
 	end
 end
 
+--[[
+-- callback from the float window, insert a bucket to a .boltdb file
+--]]
 local function insert_bucket()
 	local txt = api.nvim_buf_get_lines(0, 0, 1, false)
-	local bktname = txt[1]
+	local bktrawname = txt[1]
+	local bktname = trimspace(bktrawname)
+
 	close_window()
 	vim.fn["BoltviewerCreateBucket"](bktname)
 	local bucketline = vim.fn["GetBucketLine"]()
-	api.nvim_buf_set_lines(boltbuf, bucketline - 1, bucketline - 1, false, txt)
+	api.nvim_buf_set_lines(boltbuf, bucketline - 1, bucketline - 1, false, {bktname})
 	print("local txt is ", txt[1])
 end
 
+--[[
+-- callback from float window, delete an entry
+--]]
 local function delete_entry(entryname)
 	close_window()
 	vim.fn["BoltviewerDeleteEntry"](boltbucket, entryname)
@@ -117,13 +154,19 @@ local function delete_entry(entryname)
 	api.nvim_buf_set_lines(boltbuf, boltline-1, boltline, false, {})
 end
 
+--[[
+-- callback from a float window, delete a bucket
+--]]
 local function delete_bucket()
 	close_window()
 	vim.fn["BoltviewerDeleteBucket"](boltbucket)
 	api.nvim_buf_set_lines(boltbuf, boltline - 1, boltline, false, {})
 end
 
-local function delete()
+--[[
+-- api: delete the entry or bucket under the cursor in .boltdb file
+--]]
+local function Delete()
 	local cursor = api.nvim_win_get_cursor(0)
 	local r, _ = unpack(cursor)
 
@@ -180,7 +223,8 @@ local function delete()
 		open_float({"delete entry " .. matchinfo[1] .. "? [y/n] " }, ' entry in "' .. bktname .. '"', keymap, true)
 	else
 		local map_ok = "delete_bucket()"
-		boltbucket = txt
+		local bucketname = trimspace(txt)
+		boltbucket = bucketname
 		local keymap = {
 			{
 				key = "<cr>",
@@ -213,10 +257,11 @@ local function delete()
 				is_lua = false,
 			},
 		}
-		open_float({ "delete bucket " .. txt .. "? [y/n] " }, "delete bucket", keymap, true)
+		open_float({ "delete bucket " .. bucketname .. "? [y/n] " }, "delete bucket", keymap, true)
 	end
 end
 
+-- helper, get current buff's line under the content
 local function get_cursor_line()
 	local cursor = api.nvim_win_get_cursor(0)
 	local r, _ = unpack(cursor)
@@ -229,6 +274,7 @@ local function get_cursor_line()
 	return text[1]
 end
 
+-- api, Insert a bucket, using the current line as a startup
 local function LuaInsertBucket()
 	local txt = get_cursor_line()
 	if not txt then
@@ -253,7 +299,7 @@ local function LuaInsertBucket()
 	open_float({ txt }, 'insert bucket "' .. txt .. '"', keymap)
 end
 
--- insert function 
+-- helper, insert or modify an entry, use the current line under cursor as a startup
 local function luaInsertEntry(insertfunction)
 	local txt = get_cursor_line()
 	if not txt then
@@ -261,6 +307,7 @@ local function luaInsertEntry(insertfunction)
 	end
 
 	local bktname = vim.fn["GetBucketName"]()
+	bktname = trimspace(bktname)
 	if bktname == "" then
 		api.nvim_err_writeln("no bucket name found")
 		return nil
@@ -282,21 +329,24 @@ local function luaInsertEntry(insertfunction)
 	open_float({ txt }, 'insert entry in "' .. bktname .. '"', keymap)
 end
 
+-- api, insert entry with the content under cursor as a atartup
 local function LuaInsertEntry()
 	luaInsertEntry("insert_entry()")
 end
 
+-- api, modify entry with the content under cursor as a atartup
 local function modify_entry()
 	luaInsertEntry("replace_entry()")
 end
 
+-- export these local variables
 return {
 	close_win = close_window,
 	-- copy the line, and insert
 	lua_insert_entry = LuaInsertEntry,
 	lua_insert_bucket = LuaInsertBucket,
 	lua_modify_entry = modify_entry,
-	delete = delete,
+	delete = Delete,
 
 	insert_entry = insert_entry,
 	insert_bucket = insert_bucket,
