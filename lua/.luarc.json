@@ -3,6 +3,8 @@
         "/home/alex/.local/share/nvim/lazy/neodev.nvim/types/nightly",
         "/usr/share/nvim/runtime/lua",
         "/home/alex/work/vim/boltviewer.nvim/lua",
+        "${3rd}/luv/library",
+        "${3rd}/luv/library",
         "${3rd}/luv/library"
     ]
 }
