@@ -5,6 +5,7 @@
         "/home/alex/work/vim/boltviewer.nvim/lua",
         "${3rd}/luv/library",
         "${3rd}/luv/library",
+        "${3rd}/luv/library",
         "${3rd}/luv/library"
     ]
 }
