@@ -12,6 +12,30 @@ local function trimspace(str)
 	return str:gsub("^%s*(.-)%s*$", "%1")
 end
 
+-- helper, find bucket name above
+local function find_bucket_above()
+	-- record origin cursor
+	local row, col = unpack(api.nvim_win_get_cursor(0))
+	for line = row, 0, -10 do
+		local endline = line - 10
+		if endline < 0 then
+			endline = 0
+		end
+		local lines = api.nvim_buf_get_lines(0, endline, line, false)
+		for i = #lines, 1, -1 do
+			if #lines[i] > 0 then
+				-- has chars
+				local firstchar = lines[i]:sub(1,1)
+				if firstchar ~= "\t" and firstchar ~= " " then
+					api.nvim_win_set_cursor(0, { row, col })
+					return { lines[i], line - (#lines - i) }
+				end
+			end
+		end
+	end
+	api.nvim_win_set_cursor(0, { row, col })
+	return nil
+end
 
 --[[
 -- open_float -- opens the folat window and set teh keymap
@@ -80,14 +104,19 @@ local function close_window()
 end
 
 -- helper: find match for key => value
-local function getmatch(txt)
-	local match = string.gmatch(txt, "%s*([^(=>)]-)%s*=>%s*(.-)%s*$")
-	local matchinfo = {}
-	for k, v in match do
-		table.insert(matchinfo, k)
-		table.insert(matchinfo, v)
+-- if needspace is true, then the first space need to be present
+local function getmatch(txt, needspace)
+	local space = "*"
+	if needspace then
+		print("need space")
+		space = "+"
 	end
-	return matchinfo
+	local start, end_, key, value = string.find(txt, "^%s"..space.."([^(=>)]-)%s*=>%s*(.-)%s*$")
+	if not start then
+		return {}
+	end
+
+	return {key, value}
 end
 
 --[[
@@ -97,7 +126,7 @@ local function replace_entry()
 	local txt = api.nvim_buf_get_lines(0, 0, 1, false)
 	local matchinfo = getmatch(txt[1])
 
-	local linecontent = api.nvim_buf_get_lines(boltbuf, boltline-1, boltline, false)
+	local linecontent = api.nvim_buf_get_lines(boltbuf, boltline - 1, boltline, false)
 	local matchinfo2 = getmatch(linecontent[1])
 
 	close_window()
@@ -108,7 +137,13 @@ local function replace_entry()
 			return nil
 		end
 		vim.fn["BoltviewerCreateEntryAnyway"](boltbucket, matchinfo[1], matchinfo[2])
-		api.nvim_buf_set_lines(boltbuf, boltline - 1, boltline, false, {"\t"..matchinfo[1].." => "..matchinfo[2]})
+		api.nvim_buf_set_lines(
+			boltbuf,
+			boltline - 1,
+			boltline,
+			false,
+			{ "\t" .. matchinfo[1] .. " => " .. matchinfo[2] }
+		)
 	else
 		api.nvim_err_writeln("entry format key => val error")
 	end
@@ -123,7 +158,7 @@ local function insert_entry()
 	close_window()
 	if #matchinfo ~= 0 then
 		vim.fn["BoltviewerCreateEntry"](boltbucket, matchinfo[1], matchinfo[2])
-		api.nvim_buf_set_lines(boltbuf, boltline, boltline, false, {"\t"..matchinfo[1].." => "..matchinfo[2]})
+		api.nvim_buf_set_lines(boltbuf, boltline, boltline, false, { "\t" .. matchinfo[1] .. " => " .. matchinfo[2] })
 	else
 		api.nvim_err_writeln("entry format key => val error")
 	end
@@ -139,9 +174,17 @@ local function insert_bucket()
 
 	close_window()
 	vim.fn["BoltviewerCreateBucket"](bktname)
-	local bucketline = vim.fn["GetBucketLine"]()
-	api.nvim_buf_set_lines(boltbuf, bucketline - 1, bucketline - 1, false, {bktname})
-	print("local txt is ", txt[1])
+	local info = find_bucket_above()
+	local bucketline
+	if not info then
+		print("bucket not found")
+		bucketline = 1
+	else
+		_, bucketline = unpack(info)
+		print("bucket line " .. bucketline)
+	end
+	api.nvim_buf_set_lines(boltbuf, bucketline - 1, bucketline - 1, false, { bktname })
+	--print("local txt is ", txt[1])
 end
 
 --[[
@@ -150,8 +193,8 @@ end
 local function delete_entry(entryname)
 	close_window()
 	vim.fn["BoltviewerDeleteEntry"](boltbucket, entryname)
-	print("boltline = " .. boltline)
-	api.nvim_buf_set_lines(boltbuf, boltline-1, boltline, false, {})
+	-- print("boltline = " .. boltline)
+	api.nvim_buf_set_lines(boltbuf, boltline - 1, boltline, false, {})
 end
 
 --[[
@@ -179,11 +222,18 @@ local function Delete()
 
 	-- index starts at 1
 	local txt = text[1]
-	local matchinfo = getmatch(txt)
+	local matchinfo = getmatch(txt, true)
+
 
 	if #matchinfo ~= 0 then
+		print("get match '" .. matchinfo[1].. "'")
 		-- is entry
-		local bktname = vim.fn["GetBucketName"]()
+		local info = find_bucket_above()
+		if not info then
+			api.nvim_err_writeln("bucket not found")
+			return nil
+		end
+		local bktname, _ = unpack(info)
 		boltbucket = bktname
 
 		local map_ok = 'delete_entry("' .. matchinfo[1] .. '")'
@@ -220,7 +270,7 @@ local function Delete()
 				is_lua = false,
 			},
 		}
-		open_float({"delete entry " .. matchinfo[1] .. "? [y/n] " }, ' entry in "' .. bktname .. '"', keymap, true)
+		open_float({ "delete entry " .. matchinfo[1] .. "? [y/n] " }, 'entry in "' .. bktname .. '"', keymap, true)
 	else
 		local map_ok = "delete_bucket()"
 		local bucketname = trimspace(txt)
@@ -281,9 +331,6 @@ local function LuaInsertBucket()
 		return nil
 	end
 
-
-	-- local bktname = vim.fn["GetBucketName"]()
-	-- boltbucket = bktname
 	local keymap = {
 		{
 			key = "<cr>",
@@ -296,17 +343,23 @@ local function LuaInsertBucket()
 			is_lua = false,
 		},
 	}
-	open_float({ txt }, 'insert bucket "' .. txt .. '"', keymap)
+	open_float({ txt }, 'insert bucket', keymap)
 end
 
 -- helper, insert or modify an entry, use the current line under cursor as a startup
-local function luaInsertEntry(insertfunction)
+-- action is the prompt in popup window
+local function luaInsertEntry(insertfunction, action)
 	local txt = get_cursor_line()
 	if not txt then
 		return nil
 	end
 
-	local bktname = vim.fn["GetBucketName"]()
+	local info = find_bucket_above()
+	if not info then
+		api.nvim_err_writeln("no bucket name found")
+		return nil
+	end
+	local bktname, _ = unpack(info)
 	bktname = trimspace(bktname)
 	if bktname == "" then
 		api.nvim_err_writeln("no bucket name found")
@@ -326,17 +379,17 @@ local function luaInsertEntry(insertfunction)
 			is_lua = false,
 		},
 	}
-	open_float({ txt }, 'insert entry in "' .. bktname .. '"', keymap)
+	open_float({ txt }, action .. ' entry', keymap)
 end
 
 -- api, insert entry with the content under cursor as a atartup
 local function LuaInsertEntry()
-	luaInsertEntry("insert_entry()")
+	luaInsertEntry("insert_entry()", "insert")
 end
 
 -- api, modify entry with the content under cursor as a atartup
 local function modify_entry()
-	luaInsertEntry("replace_entry()")
+	luaInsertEntry("replace_entry()", "modify")
 end
 
 -- export these local variables

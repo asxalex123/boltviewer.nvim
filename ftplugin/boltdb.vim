@@ -1,6 +1,5 @@
 
 if exists('g:loaded_boltviewer')
-    call BoltviewerLoad()
     finish
 endif
 
@@ -22,16 +21,17 @@ call remote#host#RegisterPlugin('boltviewer', '0', [
 \ {'type': 'function', 'name': 'BoltviewerLoad', 'sync': 1, 'opts': {}},
 \ ])
 
-function! GetBucketName()
-    let @" = ""
-    execute "normal! ma$?^[^ \t].*$\<cr>viwy:nohl\<cr>`a"
-    return @"
-endfunction
+" function! GetBucketInfo()
+"     let @" = ""
+"     let curline = 0
+"     execute "normal! ma$?^[^ \t].*$\<cr>viwy:nohl\<cr>:let curline=line('.')\<cr>`a"
+"     return [@", curline]
+" endfunction
 
-function! GetBucketLine()
-    execute "normal! ma$?^[^ \t].*$\<cr>:let tempname=nvim_win_get_cursor(0)\<cr>:nohl\<cr>`a"
-    return tempname[0]
-endfunction
+" function! GetBucketLine()
+"     execute "normal! ma$?^[^ \t].*$\<cr>:let tempname=nvim_win_get_cursor(0)\<cr>:nohl\<cr>`a"
+"     return tempname[0]
+" endfunction
 
 function! BoltviewerInsertBucket()
     lua require'boltviewer'.lua_insert_bucket()
@@ -52,7 +52,7 @@ endfunction
 call BoltviewerLoad()
 
 nnoremap <leader>bib :call BoltviewerInsertBucket()<cr>
-nnoremap <leader>bie :call BoltviewerInsertEntry()<cr>
+nnoremap <silent> <leader>bie :call BoltviewerInsertEntry()<cr>
 nnoremap <leader>bd :call BoltviewerDelete()<cr>
 nnoremap <leader>bm :call BoltviewerModifyEntry()<cr>
 
